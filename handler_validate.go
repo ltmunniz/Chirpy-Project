@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,10 +98,32 @@ func getCleanedBody(body string, badWords map[string]struct{}) string {
 
 func (cfg *apiConfig) handlerChirpsListAll(w http.ResponseWriter, r *http.Request) {
 
-	dbChirps, err := cfg.db.ListAllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
-		return
+	authorId := r.URL.Query().Get("author_id")
+	sortType := r.URL.Query().Get("sort")
+
+	var (
+		dbChirps []database.Chirp
+		err      error
+	)
+
+	if authorId != "" {
+		userId, err := uuid.Parse(authorId)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author_id", err)
+			return
+		}
+
+		dbChirps, err = cfg.db.GetChirpByAuthorId(r.Context(), userId)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
+			return
+		}
+	} else {
+		dbChirps, err = cfg.db.ListAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
+			return
+		}
 	}
 
 	chirps := []Chirp{}
@@ -112,6 +135,12 @@ func (cfg *apiConfig) handlerChirpsListAll(w http.ResponseWriter, r *http.Reques
 			UserID:    dbChirp.UserID,
 			Body:      dbChirp.Body,
 		})
+	}
+
+	if sortType == "desc" {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+	} else {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.Before(chirps[j].CreatedAt) })
 	}
 
 	respondWithJSON(w, http.StatusOK, chirps)
